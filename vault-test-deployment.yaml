@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: vault-test
+  name: auth-test-deployment
+  labels:
+    app: auth-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth-test
+  strategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: auth-test
+      annotations:
+        # https://www.vaultproject.io/docs/platform/k8s/injector/annotations
+        #enable injector
+        vault.hashicorp.com/agent-inject: "true"
+        # kubernetes auth path with the wrapper it's same as secret engine name auth/<secret-engine-name>
+        vault.hashicorp.com/auth-path: auth/stg/tttt/vault-test/vault-auth
+        # the role in kubernetes authentication
+        vault.hashicorp.com/role: "stg-tttt-vault-test-vault-auth"
+        # get data from vault again
+        vault.hashicorp.com/agent-inject-status: "update"
+        # data will be saved in /vault/secrets/FILEPATH like  "/vault/secrets/env"
+        # FILEPATH is determined with agent-ingect-secret-FILEPATH
+        # the value of this annotation is the path in vault
+        # https://learn.hashicorp.com/tutorials/vault/kubernetes-sidecar#inject-secrets-into-the-pod
+        vault.hashicorp.com/agent-inject-secret-env: "stg/tttt/vault-test/vault-auth/data/env"
+        # if we want to be a connection string we can add secret's vaule to a template and write it in the file in /vault/secrets
+        # https://learn.hashicorp.com/tutorials/vault/kubernetes-sidecar#apply-a-template-to-the-injected-secrets
+        # Environment variable export template
+        # for more example of agent : https://www.vaultproject.io/docs/platform/k8s/injector/examples
+        vault.hashicorp.com/agent-inject-template-env: |
+          {{ with secret "stg/tttt/vault-test/vault-auth/data/env" -}}
+            export USERNAME="{{ .Data.data.foo }}"
+            export PASSWORD="{{ .Data.data.zip }}"
+          {{- end }}
+        # we should run source command to export this variables so we need this annotation to run the command
+        # for each FILEPATH it's a specific annotation
+#        vault.hashicorp.com/agent-inject-command-config: . /vault/secrets/config
+    spec:
+      # the service account which is authorized in vault - kubernetes (it's in this namespace scope)
+      serviceAccountName: vault-auth
+      containers:
+        - image: nginx:latest
+          command: [ "/bin/sh" ]
+          # we had to add this to render file config and eexport variabls
+          args: [ "-c", ". /vault/secrets/env && printenv > variables.txt " ]
+          imagePullPolicy: Always
+          name: auth-test
+          ports:
+            - containerPort: 80
+          resources:
+            limits:
+              memory: 100Mi
+            requests:
+              memory: 50Mi
